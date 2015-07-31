@@ -1,6 +1,6 @@
 ﻿{
     "frameworks": {
-        "net35": { }
+        ".NETPortable,Version=v4.6,Profile=Profile32": { }
     },
     "dependencies": {
         "xunit.abstractions": "2.0.0"

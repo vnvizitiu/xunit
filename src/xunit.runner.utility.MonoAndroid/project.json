@@ -1,6 +1,6 @@
 ﻿{
     "frameworks": {
-        "net35": { }
+        "MonoAndroid,Version=v5.0": { }
     },
     "dependencies": {
         "xunit.abstractions": "2.0.0"

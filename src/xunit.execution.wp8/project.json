@@ -1,6 +1,6 @@
 ﻿{
     "frameworks": {
-        "net35": { }
+        "WindowsPhone,Version=v8.0": { }
     },
     "dependencies": {
         "xunit.abstractions": "2.0.0"
