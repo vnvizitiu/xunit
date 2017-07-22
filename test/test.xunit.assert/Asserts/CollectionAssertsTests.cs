@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Linq;
 using NSubstitute;
 using Xunit;
 using Xunit.Sdk;
@@ -77,6 +78,7 @@ public class CollectionAssertsTests
             Assert.Equal(1, collEx.ExpectedCount);
             Assert.Equal(0, collEx.ActualCount);
             Assert.Equal("Assert.Collection() Failure" + Environment.NewLine +
+                         "Collection: []" + Environment.NewLine +
                          "Expected item count: 1" + Environment.NewLine +
                          "Actual item count:   0", collEx.Message);
             Assert.Null(collEx.InnerException);
@@ -108,6 +110,7 @@ public class CollectionAssertsTests
             var collEx = Assert.IsType<CollectionException>(ex);
             Assert.Equal(1, collEx.IndexFailurePoint);
             Assert.Equal("Assert.Collection() Failure" + Environment.NewLine +
+                         "Collection: [42, 2112]" + Environment.NewLine +
                          "Error during comparison of item at index 1" + Environment.NewLine +
                          "Inner exception: Assert.Equal() Failure" + Environment.NewLine +
                          "        Expected: 2113" + Environment.NewLine +
@@ -350,7 +353,17 @@ public class CollectionAssertsTests
 
             EmptyException ex = Assert.Throws<EmptyException>(() => Assert.Empty(list));
 
-            Assert.Equal("Assert.Empty() Failure", ex.Message);
+            Assert.Equal($"Assert.Empty() Failure{Environment.NewLine}Collection: [42]", ex.Message);
+        }
+
+        [Fact]
+        public static void EnumeratorDisposed()
+        {
+            var enumerator = new SpyEnumerator<int>(Enumerable.Empty<int>());
+
+            Assert.Empty(enumerator);
+
+            Assert.True(enumerator.IsDisposed);
         }
 
         [Fact]
@@ -364,7 +377,7 @@ public class CollectionAssertsTests
         {
             EmptyException ex = Assert.Throws<EmptyException>(() => Assert.Empty("Foo"));
 
-            Assert.Equal("Assert.Empty() Failure", ex.Message);
+            Assert.Equal($"Assert.Empty() Failure{Environment.NewLine}Collection: \"Foo\"", ex.Message);
         }
     }
 
@@ -468,8 +481,8 @@ public class CollectionAssertsTests
         [Fact]
         public static void InOrderSet()
         {
-            var expected = new HashSet<int> { 1, 2, 3};
-            var actual = new HashSet<int>  { 1, 2, 3 };
+            var expected = new HashSet<int> { 1, 2, 3 };
+            var actual = new HashSet<int> { 1, 2, 3 };
 
             Assert.Equal(expected, actual);
             Assert.Throws<NotEqualException>(() => Assert.NotEqual(expected, actual));
@@ -489,7 +502,7 @@ public class CollectionAssertsTests
         public static void ExpectedLarger()
         {
             var expected = new HashSet<int> { 1, 2, 3 };
-            var actual = new HashSet<int> { 1, 2};
+            var actual = new HashSet<int> { 1, 2 };
 
             Assert.NotEqual(expected, actual);
             Assert.Throws<EqualException>(() => Assert.Equal(expected, actual));
@@ -498,7 +511,7 @@ public class CollectionAssertsTests
         [Fact]
         public static void ActualLarger()
         {
-            var expected = new HashSet<int> { 1, 2};
+            var expected = new HashSet<int> { 1, 2 };
             var actual = new HashSet<int> { 1, 2, 3 };
 
             Assert.NotEqual(expected, actual);
@@ -556,6 +569,16 @@ public class CollectionAssertsTests
             var list = new List<int> { 42 };
 
             Assert.NotEmpty(list);
+        }
+
+        [Fact]
+        public static void EnumeratorDisposed()
+        {
+            var enumerator = new SpyEnumerator<int>(Enumerable.Range(0, 1));
+
+            Assert.NotEmpty(enumerator);
+
+            Assert.True(enumerator.IsDisposed);
         }
     }
 
@@ -814,6 +837,45 @@ public class CollectionAssertsTests
 
             Assert.IsType<SingleException>(ex);
             Assert.Equal("The collection contained 2 matching element(s) instead of 1.", ex.Message);
+        }
+    }
+
+    sealed class SpyEnumerator<T> : IEnumerable<T>, IEnumerator<T>
+    {
+        IEnumerator<T> innerEnumerator;
+
+        public SpyEnumerator(IEnumerable<T> enumerable)
+        {
+            innerEnumerator = enumerable.GetEnumerator();
+        }
+
+        public T Current
+            => innerEnumerator.Current;
+
+        object IEnumerator.Current
+            => innerEnumerator.Current;
+
+        public bool IsDisposed
+            => innerEnumerator == null;
+
+        public IEnumerator<T> GetEnumerator()
+            => this;
+
+        IEnumerator IEnumerable.GetEnumerator()
+            => this;
+
+        public bool MoveNext()
+            => innerEnumerator.MoveNext();
+
+        public void Reset()
+        {
+            throw new NotImplementedException();
+        }
+
+        public void Dispose()
+        {
+            innerEnumerator.Dispose();
+            innerEnumerator = null;
         }
     }
 }

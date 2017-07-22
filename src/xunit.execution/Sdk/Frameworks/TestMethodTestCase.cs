@@ -182,12 +182,24 @@ namespace Xunit.Sdk
         {
             using (var stream = new MemoryStream())
             {
-                Write(stream, TestMethod.TestClass.TestCollection.TestAssembly.Assembly.Name);
+                var assemblyName = TestMethod.TestClass.TestCollection.TestAssembly.Assembly.Name;
+
+                //Get just the assembly name (without version info) when obtained by reflection
+                IReflectionAssemblyInfo assembly = TestMethod.TestClass.TestCollection.TestAssembly.Assembly as IReflectionAssemblyInfo;
+                if (assembly != null)
+                    assemblyName = assembly.Assembly.GetName().Name;
+
+                Write(stream, assemblyName);
                 Write(stream, TestMethod.TestClass.Class.Name);
                 Write(stream, TestMethod.Method.Name);
 
                 if (TestMethodArguments != null)
                     Write(stream, SerializationHelper.Serialize(TestMethodArguments));
+
+                var genericTypes = MethodGenericTypes;
+                if (genericTypes != null)
+                    for (var idx = 0; idx < genericTypes.Length; idx++)
+                        Write(stream, TypeUtility.ConvertToSimpleTypeName(genericTypes[idx]));
 
                 stream.Position = 0;
 
@@ -204,7 +216,7 @@ namespace Xunit.Sdk
 
         /// <summary>Converts an array of bytes to its hexadecimal value as a string.</summary>
         /// <param name="bytes">The bytes.</param>
-        /// <returns>A string containing the hexademical representation of the provided bytes.</returns>
+        /// <returns>A string containing the hexadecimal representation of the provided bytes.</returns>
         static string BytesToHexString(byte[] bytes)
         {
             char[] chars = new char[bytes.Length * 2];
@@ -217,7 +229,7 @@ namespace Xunit.Sdk
             return new string(chars);
         }
 
-        /// <summary>Gets a hexademical digit character from the 4-bit value.</summary>
+        /// <summary>Gets a hexadecimal digit character from the 4-bit value.</summary>
         /// <param name="b">A value in the range [0, 15].</param>
         /// <returns>A character in the range ['0','9'] or ['a','f'].</returns>
         static char NibbleToHexChar(int b)

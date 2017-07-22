@@ -18,9 +18,6 @@ namespace Xunit.Sdk
         /// </summary>
         public static readonly string DisplayName = string.Format(CultureInfo.InvariantCulture, "xUnit.net {0}", new object[] { typeof(XunitTestFrameworkDiscoverer).GetTypeInfo().Assembly.GetName().Version });
 
-        readonly Dictionary<Type, IXunitTestCaseDiscoverer> discovererCache = new Dictionary<Type, IXunitTestCaseDiscoverer>();
-        readonly Dictionary<Type, Type> discovererTypeCache = new Dictionary<Type, Type>(); // key is a Type that is or derives from FactAttribute
-
         /// <summary>
         /// Initializes a new instance of the <see cref="XunitTestFrameworkDiscoverer"/> class.
         /// </summary>
@@ -38,7 +35,7 @@ namespace Xunit.Sdk
             var disableParallelization = collectionBehaviorAttribute != null && collectionBehaviorAttribute.GetNamedArgument<bool>("DisableTestParallelization");
 
             string config = null;
-#if !PLATFORM_DOTNET
+#if NET452
             config = AppDomain.CurrentDomain.SetupInformation.ConfigurationFile;
 #endif
             var testAssembly = new TestAssembly(assemblyInfo, config);
@@ -46,6 +43,11 @@ namespace Xunit.Sdk
             TestCollectionFactory = collectionFactory ?? ExtensibilityPointFactory.GetXunitTestCollectionFactory(diagnosticMessageSink, collectionBehaviorAttribute, testAssembly);
             TestFrameworkDisplayName = $"{DisplayName} [{TestCollectionFactory.DisplayName}, {(disableParallelization ? "non-parallel" : "parallel")}]";
         }
+
+        /// <summary>
+        /// Gets the mapping dictionary of fact attribute type to discoverer type.
+        /// </summary>
+        protected Dictionary<Type, Type> DiscovererTypeCache { get; } = new Dictionary<Type, Type>(); // key is a Type that is or derives from FactAttribute
 
         /// <summary>
         /// Gets the test collection factory that makes test collections.
@@ -83,7 +85,7 @@ namespace Xunit.Sdk
             var factAttributeType = (factAttribute as IReflectionAttributeInfo)?.Attribute.GetType();
 
             Type discovererType = null;
-            if (factAttributeType == null || !discovererTypeCache.TryGetValue(factAttributeType, out discovererType))
+            if (factAttributeType == null || !DiscovererTypeCache.TryGetValue(factAttributeType, out discovererType))
             {
                 var testCaseDiscovererAttribute = factAttribute.GetCustomAttributes(typeof(XunitTestCaseDiscovererAttribute)).FirstOrDefault();
                 if (testCaseDiscovererAttribute != null)
@@ -93,7 +95,7 @@ namespace Xunit.Sdk
                 }
 
                 if (factAttributeType != null)
-                    discovererTypeCache[factAttributeType] = discovererType;
+                    DiscovererTypeCache[factAttributeType] = discovererType;
 
             }
             if (discovererType == null)
@@ -131,24 +133,15 @@ namespace Xunit.Sdk
         /// <returns>Returns the test case discoverer instance.</returns>
         protected IXunitTestCaseDiscoverer GetDiscoverer(Type discovererType)
         {
-            IXunitTestCaseDiscoverer result;
-
-            if (!discovererCache.TryGetValue(discovererType, out result))
+            try
             {
-                try
-                {
-                    result = ExtensibilityPointFactory.GetXunitTestCaseDiscoverer(DiagnosticMessageSink, discovererType);
-                }
-                catch (Exception ex)
-                {
-                    result = null;
-                    DiagnosticMessageSink.OnMessage(new DiagnosticMessage($"Discoverer type '{discovererType.FullName}' could not be created or does not implement IXunitTestCaseDiscoverer: {ex}"));
-                }
-
-                discovererCache[discovererType] = result;
+                return ExtensibilityPointFactory.GetXunitTestCaseDiscoverer(DiagnosticMessageSink, discovererType);
             }
-
-            return result;
+            catch (Exception ex)
+            {
+                DiagnosticMessageSink.OnMessage(new DiagnosticMessage($"Discoverer type '{discovererType.FullName}' could not be created or does not implement IXunitTestCaseDiscoverer: {ex.Unwrap()}"));
+                return null;
+            }
         }
     }
 }

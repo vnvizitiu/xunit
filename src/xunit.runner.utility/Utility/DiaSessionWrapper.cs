@@ -1,4 +1,4 @@
-﻿#if !PLATFORM_DOTNET
+﻿#if NET35 || NET452
 
 using System;
 
@@ -36,5 +36,4 @@ namespace Xunit
         }
     }
 }
-
 #endif

@@ -7,10 +7,9 @@ using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Threading.Tasks;
-using System.Xml;
 using System.Xml.Linq;
-using System.Xml.Xsl;
 using Microsoft.Build.Framework;
+using Xunit.Runner.MSBuild.Xslt;
 using MSBuildTask = Microsoft.Build.Utilities.Task;
 
 namespace Xunit.Runner.MSBuild
@@ -40,12 +39,6 @@ namespace Xunit.Runner.MSBuild
         [Output]
         public int ExitCode { get; protected set; }
 
-        /// <summary>
-        /// Sets whether test failures will be ignored and allow the build to proceed.
-        /// When set to <c>false</c>, test failures will cause the build to fail.
-        /// </summary>
-        public bool IgnoreFailures { get; protected set; }
-
         public bool FailSkips { get; protected set; }
 
         protected XunitFilters Filters
@@ -66,14 +59,16 @@ namespace Xunit.Runner.MSBuild
 
         public ITaskItem Html { get; set; }
 
+        public bool IgnoreFailures { get; set; }
+
         public string IncludeTraits { get; set; }
+
+        public bool InternalDiagnosticMessages { get; set; }
 
         public string MaxParallelThreads { get; set; }
 
         protected bool NeedsXml
-        {
-            get { return Xml != null || XmlV1 != null || Html != null || NUnit != null; }
-        }
+            => Xml != null || XmlV1 != null || Html != null || NUnit != null;
 
         public bool NoAutoReporters { get; set; }
 
@@ -108,7 +103,7 @@ namespace Xunit.Runner.MSBuild
             RemotingUtility.CleanUpRegisteredChannels();
 
             XElement assembliesElement = null;
-            var environment = $"{IntPtr.Size * 8}-bit .NET {Environment.Version}";
+            var environment = $"{IntPtr.Size * 8}-bit {CrossPlatform.Version}";
 
             if (NeedsXml)
                 assembliesElement = new XElement("assemblies");
@@ -203,16 +198,16 @@ namespace Xunit.Runner.MSBuild
             if (NeedsXml)
             {
                 if (Xml != null)
-                    assembliesElement.Save(Xml.GetMetadata("FullPath"));
+                    assembliesElement.Save(new FileStream(Xml.GetMetadata("FullPath"), FileMode.OpenOrCreate));
 
                 if (XmlV1 != null)
-                    Transform("xUnit1.xslt", assembliesElement, XmlV1);
+                    CrossPlatform.Transform(logger, "XmlV1", "xUnit1.xslt", assembliesElement, XmlV1);
 
                 if (Html != null)
-                    Transform("HTML.xslt", assembliesElement, Html);
+                    CrossPlatform.Transform(logger, "Html", "HTML.xslt", assembliesElement, Html);
 
                 if (NUnit != null)
-                    Transform("NUnitXml.xslt", assembliesElement, NUnit);
+                    CrossPlatform.Transform(logger, "NUnit", "NUnitXml.xslt", assembliesElement, NUnit);
             }
 
             // ExitCode is set to 1 for test failures and -1 for Exceptions.
@@ -231,9 +226,10 @@ namespace Xunit.Runner.MSBuild
                 // Turn off pre-enumeration of theories, since there is no theory selection UI in this runner
                 assembly.Configuration.PreEnumerateTheories = false;
                 assembly.Configuration.DiagnosticMessages |= DiagnosticMessages;
+                assembly.Configuration.InternalDiagnosticMessages |= InternalDiagnosticMessages;
 
                 if (appDomains.HasValue)
-                    assembly.Configuration.AppDomain = appDomains.GetValueOrDefault() ? AppDomainSupport.Required : AppDomainSupport.Denied;
+                    assembly.Configuration.AppDomain = appDomains.GetValueOrDefault() ? AppDomainSupport.IfAvailable : AppDomainSupport.Denied;
 
                 // Setup discovery and execution options with command-line overrides
                 var discoveryOptions = TestFrameworkOptions.ForDiscovery(assembly.Configuration);
@@ -249,6 +245,9 @@ namespace Xunit.Runner.MSBuild
                 var shadowCopy = assembly.Configuration.ShadowCopyOrDefault;
                 var longRunningSeconds = assembly.Configuration.LongRunningTestSecondsOrDefault;
 
+#if NETCOREAPP1_0
+                using (NetCoreAssemblyHelper.SubscribeResolve(Path.GetDirectoryName(assembly.AssemblyFilename)))
+#endif
                 using (var controller = new XunitFrontController(appDomainSupport, assembly.AssemblyFilename, assembly.ConfigFilename, shadowCopy, diagnosticMessageSink: diagnosticMessageSink))
                 using (var discoverySink = new TestDiscoverySink(() => cancel))
                 {
@@ -315,7 +314,7 @@ namespace Xunit.Runner.MSBuild
         protected virtual List<IRunnerReporter> GetAvailableRunnerReporters()
         {
             var result = new List<IRunnerReporter>();
-            var runnerPath = Path.GetDirectoryName(Assembly.GetExecutingAssembly().GetLocalCodeBase());
+            var runnerPath = Path.GetDirectoryName(Assembly.GetEntryAssembly().GetLocalCodeBase());
 
             foreach (var dllFile in Directory.GetFiles(runnerPath, "*.dll").Select(f => Path.Combine(runnerPath, f)))
             {
@@ -323,7 +322,7 @@ namespace Xunit.Runner.MSBuild
 
                 try
                 {
-                    var assembly = Assembly.LoadFile(dllFile);
+                    var assembly = CrossPlatform.LoadAssembly(dllFile);
                     types = assembly.GetTypes();
                 }
                 catch (ReflectionTypeLoadException ex)
@@ -338,7 +337,7 @@ namespace Xunit.Runner.MSBuild
                 foreach (var type in types)
                 {
 #pragma warning disable CS0618
-                    if (type == null || type.IsAbstract || type == typeof(DefaultRunnerReporter) || type == typeof(DefaultRunnerReporterWithTypes) || !type.GetInterfaces().Any(t => t == typeof(IRunnerReporter)))
+                    if (type == null || type.GetTypeInfo().IsAbstract || type == typeof(DefaultRunnerReporter) || type == typeof(DefaultRunnerReporterWithTypes) || !type.GetInterfaces().Any(t => t == typeof(IRunnerReporter)))
                         continue;
 #pragma warning restore CS0618
 
@@ -379,19 +378,6 @@ namespace Xunit.Runner.MSBuild
             }
 
             return reporter ?? new DefaultRunnerReporterWithTypes();
-        }
-
-        static void Transform(string resourceName, XNode xml, ITaskItem outputFile)
-        {
-            var xmlTransform = new XslCompiledTransform();
-
-            using (var writer = XmlWriter.Create(outputFile.GetMetadata("FullPath"), new XmlWriterSettings { Indent = true }))
-            using (var xsltReader = XmlReader.Create(typeof(xunit).Assembly.GetManifestResourceStream("xunit.runner.msbuild." + resourceName)))
-            using (var xmlReader = xml.CreateReader())
-            {
-                xmlTransform.Load(xsltReader);
-                xmlTransform.Transform(xmlReader, writer);
-            }
         }
     }
 }

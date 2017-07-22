@@ -1,7 +1,7 @@
 using System;
 using System.IO;
 
-#if PLATFORM_DOTNET
+#if NETSTANDARD1_1
 using System.Reflection;
 #endif
 
@@ -36,6 +36,8 @@ namespace Xunit
                         {
                             if (string.Equals(propertyName, Configuration.DiagnosticMessages, StringComparison.OrdinalIgnoreCase))
                                 result.DiagnosticMessages = booleanValue;
+                            if (string.Equals(propertyName, Configuration.InternalDiagnosticMessages, StringComparison.OrdinalIgnoreCase))
+                                result.InternalDiagnosticMessages = booleanValue;
                             if (string.Equals(propertyName, Configuration.ParallelizeAssembly, StringComparison.OrdinalIgnoreCase))
                                 result.ParallelizeAssembly = booleanValue;
                             if (string.Equals(propertyName, Configuration.ParallelizeTestCollections, StringComparison.OrdinalIgnoreCase))
@@ -129,7 +131,7 @@ namespace Xunit
             return null;
         }
 
-#if PLATFORM_DOTNET
+#if NETSTANDARD1_1
         static Lazy<MethodInfo> fileOpenReadMethod = new Lazy<MethodInfo>(GetFileOpenReadMethod);
 
         static MethodInfo GetFileOpenReadMethod()
@@ -160,6 +162,7 @@ namespace Xunit
         {
             public const string AppDomain = "appDomain";
             public const string DiagnosticMessages = "diagnosticMessages";
+            public const string InternalDiagnosticMessages = "internalDiagnosticMessages";
             public const string MaxParallelThreads = "maxParallelThreads";
             public const string MethodDisplay = "methodDisplay";
             public const string ParallelizeAssembly = "parallelizeAssembly";

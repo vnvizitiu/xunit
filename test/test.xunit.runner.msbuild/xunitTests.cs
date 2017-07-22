@@ -36,17 +36,6 @@ public class xunitTests
         }
 
         [Fact]
-        public static void DoesNotChangeCurrentDirectoryWhenWorkingFolderIsNull()
-        {
-            var currentFolder = Directory.GetCurrentDirectory();
-            var xunit = new Testable_xunit();
-
-            xunit.Execute();
-
-            Assert.Equal(currentFolder, Directory.GetCurrentDirectory());
-        }
-
-        [Fact]
         public static void LogsWelcomeBanner()
         {
             var xunit = new Testable_xunit();
@@ -54,7 +43,7 @@ public class xunitTests
             xunit.Execute();
 
             var eventArgs = Assert.IsType<BuildMessageEventArgs>(xunit.BuildEngine.Captured(x => x.LogMessageEvent(null)).Args().Single());
-            Assert.Equal(string.Format("xUnit.net MSBuild Runner ({0}-bit .NET {1})", IntPtr.Size * 8, Environment.Version), eventArgs.Message);
+            Assert.Equal(string.Format("xUnit.net MSBuild Runner ({0}-bit Desktop .NET {1})", IntPtr.Size * 8, Environment.Version), eventArgs.Message);
             Assert.Equal(MessageImportance.High, eventArgs.Importance);
         }
 

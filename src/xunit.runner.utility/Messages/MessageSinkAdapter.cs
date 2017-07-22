@@ -28,11 +28,10 @@ namespace Xunit
         /// <returns>The hash set of interfaces, if known; <c>null</c>, otherwise.</returns>
         public static HashSet<string> GetImplementedInterfaces(IMessageSinkMessage message)
         {
-            var messageWithTypes = message as IMessageSinkMessageWithTypes;
-            if (messageWithTypes != null)
+            if (message is IMessageSinkMessageWithTypes messageWithTypes)
                 return messageWithTypes.InterfaceTypes;
 
-#if !PLATFORM_DOTNET
+#if NET35 || NET452
             // Can't get the list of interfaces across the remoting boundary
             if (System.Runtime.Remoting.RemotingServices.IsTransparentProxy(message))
                 return null;

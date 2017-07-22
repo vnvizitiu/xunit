@@ -4,6 +4,8 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using System.Reflection;
+using System.Runtime.InteropServices;
+using System.Threading.Tasks;
 using Xunit;
 using Xunit.Abstractions;
 using Xunit.Sdk;
@@ -27,7 +29,8 @@ public class Xunit2TheoryAcceptanceTests
                 result => Assert.Equal(@"Xunit2TheoryAcceptanceTests+TheoryTests+ClassWithOptionalParameters.OneOptional_TwoParameters_TwoPassed(s: ""abc"", i: 6)", result.Test.DisplayName),
                 result => Assert.Equal(@"Xunit2TheoryAcceptanceTests+TheoryTests+ClassWithOptionalParameters.TwoOptional_TwoParameters_FirstOnePassed(s: ""def"", i: 5)", result.Test.DisplayName),
                 result => Assert.Equal(@"Xunit2TheoryAcceptanceTests+TheoryTests+ClassWithOptionalParameters.TwoOptional_TwoParameters_NonePassed(s: ""abc"", i: 5)", result.Test.DisplayName),
-                result => Assert.Equal(@"Xunit2TheoryAcceptanceTests+TheoryTests+ClassWithOptionalParameters.TwoOptional_TwoParameters_TwoPassedInOrder(s: ""def"", i: 6)", result.Test.DisplayName)
+                result => Assert.Equal(@"Xunit2TheoryAcceptanceTests+TheoryTests+ClassWithOptionalParameters.TwoOptional_TwoParameters_TwoPassedInOrder(s: ""def"", i: 6)", result.Test.DisplayName),
+                result => Assert.Equal(@"Xunit2TheoryAcceptanceTests+TheoryTests+ClassWithOptionalParameters.TwoOptionalAttributes_NonePassed(x: null, y: 0)", result.Test.DisplayName)
             );
         }
 
@@ -106,6 +109,14 @@ public class Xunit2TheoryAcceptanceTests
             {
                 Assert.Equal("def", s);
                 Assert.Equal(6, i);
+            }
+
+            [Theory]
+            [InlineData()]
+            public void TwoOptionalAttributes_NonePassed([Optional]object x, [Optional]int y)
+            {
+                Assert.Null(x);
+                Assert.Equal(0, y);
             }
         }
 
@@ -240,6 +251,70 @@ public class Xunit2TheoryAcceptanceTests
                 Assert.Equal("def", s);
                 Assert.Equal(2, i);
                 Assert.Equal(new object[] { 3, 4, 5 }, array);
+            }
+        }
+
+        [Fact]
+        public void ImplicitExplicitConversions()
+        {
+            var results = Run<ITestResultMessage>(typeof(ClassWithOperatorConversions));
+
+            Assert.Collection(results.Cast<ITestPassed>().OrderBy(r => r.Test.DisplayName),
+                result => Assert.Equal(@"Xunit2TheoryAcceptanceTests+TheoryTests+ClassWithOperatorConversions.ExplicitConversion(e: Explicit { Value = ""abc"" })", result.Test.DisplayName),
+                result => Assert.Equal(@"Xunit2TheoryAcceptanceTests+TheoryTests+ClassWithOperatorConversions.ImplicitConversion(i: Implicit { Value = ""abc"" })", result.Test.DisplayName),
+                result => Assert.Equal(@"Xunit2TheoryAcceptanceTests+TheoryTests+ClassWithOperatorConversions.IntToLong(i: 1)", result.Test.DisplayName),
+                result => Assert.Equal(@"Xunit2TheoryAcceptanceTests+TheoryTests+ClassWithOperatorConversions.UIntToULong(i: 1)", result.Test.DisplayName)
+            );
+        }
+
+        public class ClassWithOperatorConversions
+        {
+            [Theory]
+            [InlineData("abc")]
+            public void ExplicitConversion(Explicit e)
+            {
+                Assert.Equal("abc", e.Value);
+            }
+
+            [Theory]
+            [InlineData("abc")]
+            public void ImplicitConversion(Implicit i)
+            {
+                Assert.Equal("abc", i.Value);
+            }
+
+            [Theory]
+            [InlineData(1)]
+            public void IntToLong(long i)
+            {
+                Assert.Equal(1L, i);
+            }
+
+            [Theory]
+            [InlineData((uint)1)]
+            public void UIntToULong(ulong i)
+            {
+                Assert.Equal(1UL, i);
+            }
+
+            public class Explicit
+            {
+                public string Value { get; set; }
+
+                public static explicit operator Explicit(string value)
+                {
+                    return new Explicit() { Value = value };
+                }
+            }
+
+            public class Implicit
+            {
+                public string Value { get; set; }
+
+                public static implicit operator Implicit(string value)
+                {
+                    return new Implicit() { Value = value };
+                }
             }
         }
 
@@ -392,6 +467,32 @@ public class Xunit2TheoryAcceptanceTests
                 Assert.IsType(expected, value);
             }
         }
+
+        [Fact]
+        public void AsyncTaskMethod_MultipleInlineDataAttributes()
+        {
+            var testMessages = Run<ITestResultMessage>(typeof(ClassWithAsyncTaskMethod));
+
+            var passed = testMessages.Cast<ITestPassed>().OrderBy(t => t.Test.DisplayName).ToArray();
+            Assert.Equal("Xunit2TheoryAcceptanceTests+InlineDataTests+ClassWithAsyncTaskMethod.TestMethod(x: A)", passed[0].Test.DisplayName);
+            Assert.Equal("Xunit2TheoryAcceptanceTests+InlineDataTests+ClassWithAsyncTaskMethod.TestMethod(x: B)", passed[1].Test.DisplayName);
+        }
+
+        enum SomeEnum
+        {
+            A, B
+        }
+
+        class ClassWithAsyncTaskMethod
+        {
+            [Theory]
+            [InlineData(SomeEnum.A)]
+            [InlineData(SomeEnum.B)]
+            async Task TestMethod(SomeEnum x)
+            {
+                await Task.Run(() => "Any statement, to prevent a C# compiler error");
+            }
+        }
     }
 
     public class ClassDataTests : AcceptanceTestV2
@@ -402,9 +503,9 @@ public class Xunit2TheoryAcceptanceTests
             var testMessages = Run<ITestResultMessage>(typeof(ClassUnderTest));
 
             var passing = Assert.Single(testMessages.OfType<ITestPassed>());
-            Assert.Equal($"Xunit2TheoryAcceptanceTests+ClassDataTests+ClassUnderTest.TestViaInlineData(x: 42, y: {21.12}, z: \"Hello, world!\")", passing.Test.DisplayName);
+            Assert.Equal($"Xunit2TheoryAcceptanceTests+ClassDataTests+ClassUnderTest.TestViaClassData(x: 42, y: {21.12}, z: \"Hello, world!\")", passing.Test.DisplayName);
             var failed = Assert.Single(testMessages.OfType<ITestFailed>());
-            Assert.Equal("Xunit2TheoryAcceptanceTests+ClassDataTests+ClassUnderTest.TestViaInlineData(x: 0, y: 0, z: null)", failed.Test.DisplayName);
+            Assert.Equal("Xunit2TheoryAcceptanceTests+ClassDataTests+ClassUnderTest.TestViaClassData(x: 0, y: 0, z: null)", failed.Test.DisplayName);
             Assert.Empty(testMessages.OfType<ITestSkipped>());
         }
 
@@ -412,7 +513,7 @@ public class Xunit2TheoryAcceptanceTests
         {
             [Theory]
             [ClassData(typeof(ClassDataSource))]
-            public void TestViaInlineData(int x, double y, string z)
+            public void TestViaClassData(int x, double y, string z)
             {
                 Assert.NotNull(z);
             }
@@ -426,10 +527,25 @@ public class Xunit2TheoryAcceptanceTests
                 yield return new object[] { 0, 0.0, null };
             }
 
-            IEnumerator IEnumerable.GetEnumerator()
-            {
-                return GetEnumerator();
-            }
+            IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+        }
+
+        [Fact]
+        public void NoDefaultConstructor_Fails()
+        {
+            var testMessages = Run<ITestResultMessage>(typeof(ClassNotImplementingIEnumerable));
+
+            var failed = Assert.Single(testMessages.Cast<ITestFailed>());
+            Assert.Equal("Xunit2TheoryAcceptanceTests+ClassDataTests+ClassNotImplementingIEnumerable.TestMethod", failed.Test.DisplayName);
+            Assert.Equal("System.ArgumentException", failed.ExceptionTypes.Single());
+            Assert.Equal("Xunit2TheoryAcceptanceTests+ClassDataTests+ClassNotImplementingIEnumerable must implement IEnumerable<object[]> to be used as ClassData for the test method named 'TestMethod' on Xunit2TheoryAcceptanceTests+ClassDataTests+ClassNotImplementingIEnumerable", failed.Messages.Single());
+        }
+
+        class ClassNotImplementingIEnumerable
+        {
+            [Theory]
+            [ClassData(typeof(ClassNotImplementingIEnumerable))]
+            public void TestMethod() { }
         }
     }
 

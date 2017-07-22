@@ -1,10 +1,11 @@
-﻿#if NET45
+﻿#if NET452
 
 using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using Microsoft.FSharp.Compiler.SimpleSourceCodeServices;
+using Microsoft.FSharp.Core;
 
 public abstract class FSharpAcceptanceTestAssembly : AcceptanceTestAssembly
 {
@@ -28,7 +29,7 @@ public abstract class FSharpAcceptanceTestAssembly : AcceptanceTestAssembly
             .Concat(GetStandardReferences().Concat(references).Select(r => $"--reference:{r}"))
             .ToArray();
 
-        var compiler = new SimpleSourceCodeServices();
+        var compiler = new SimpleSourceCodeServices(FSharpOption<bool>.Some(false));
         var result = compiler.Compile(compilerArgs);
         if (result.Item2 != 0)
         {

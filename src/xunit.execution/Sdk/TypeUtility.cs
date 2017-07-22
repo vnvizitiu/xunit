@@ -12,7 +12,12 @@ namespace Xunit.Sdk
     {
         readonly static ITypeInfo ObjectTypeInfo = Reflector.Wrap(typeof(object));
 
-        static string ConvertToSimpleTypeName(ITypeInfo type)
+        /// <summary>
+        /// Converts a type into a name string.
+        /// </summary>
+        /// <param name="type">The type to convert.</param>
+        /// <returns>Name string of type.</returns>
+        public static string ConvertToSimpleTypeName(ITypeInfo type)
         {
             var baseTypeName = type.Name;
 
@@ -43,19 +48,15 @@ namespace Xunit.Sdk
         /// <param name="testMethod">The test method to resolve.</param>
         /// <param name="arguments">The user-supplied method arguments.</param>
         /// <returns>The argument values</returns>
-        public static object[] ResolveMethodArguments(this MethodInfo testMethod, object[] arguments)
+        public static object[] ResolveMethodArguments(this MethodBase testMethod, object[] arguments)
         {
-            var parameters = testMethod.GetParameters();
-            bool hasOptionalParameters = parameters.Any(parameter => parameter.IsOptional);
+            ParameterInfo[] parameters = testMethod.GetParameters();
             bool hasParamsParameter = false;
             if (parameters.Length > 0)
             {
                 // Params can only be added at the end of the parameter list
                 hasParamsParameter = parameters[parameters.Length - 1].GetCustomAttribute(typeof(ParamArrayAttribute)) != null;
             }
-
-            if (!hasOptionalParameters && !hasParamsParameter)
-                return arguments;
 
             int nonOptionalParameterCount = parameters.Count(p => !p.IsOptional);
             if (hasParamsParameter)
@@ -102,14 +103,57 @@ namespace Xunit.Sdk
                 }
             }
 
+            // If the argument has been provided, pass the argument value
             for (int i = 0; i < arguments.Length - resolvedArgumentsCount; i++)
-                newArguments[i] = arguments[i];
+                newArguments[i] = TryConvertObject(arguments[i], parameters[i].ParameterType);
 
+            // If the argument has not been provided, pass the default value
             int unresolvedParametersCount = hasParamsParameter ? parameters.Length - 1 : parameters.Length;
             for (int i = arguments.Length; i < unresolvedParametersCount; i++)
-                newArguments[i] = parameters[i].DefaultValue;
+            {
+                ParameterInfo parameter = parameters[i];
+                if (parameter.HasDefaultValue)
+                    newArguments[i] = parameter.DefaultValue;
+                else
+                    newArguments[i] = parameter.ParameterType.GetTypeInfo().GetDefaultValue();
+            }
 
             return newArguments;
+        }
+
+        private static object TryConvertObject(object argumentValue, Type parameterType)
+        {
+            Type argumentValueType = argumentValue?.GetType();
+            if (argumentValueType == null)
+            {
+                // We don't need to check if we're passing null to a value type here, as MethodInfo.Invoke does this
+                return argumentValue;
+            }
+            else if (parameterType.IsAssignableFrom(argumentValueType))
+            {
+                // No need to perform conversion
+                return argumentValue;
+            }
+
+            Type[] methodTypes = new Type[] { argumentValueType };
+            object[] methodArguments = new object[] { argumentValue };
+
+            // Check if we can implicitly convert the argument type to the parameter type
+            MethodInfo implicitMethod = parameterType.GetRuntimeMethod("op_Implicit", methodTypes);
+            if (implicitMethod != null && implicitMethod.IsStatic)
+            {
+                return implicitMethod.Invoke(null, methodArguments);
+            }
+
+            // Check if we can explicitly convert the argument type to the parameter type
+            MethodInfo explicitMethod = parameterType.GetRuntimeMethod("op_Explicit", methodTypes);
+            if (explicitMethod != null && explicitMethod.IsStatic)
+            {
+                return explicitMethod.Invoke(null, methodArguments);
+            }
+
+            // Can't convert object. We don't need to throw anything here, since MethodInfo.Invoke does
+            return argumentValue;
         }
 
         /// <summary>
@@ -176,7 +220,7 @@ namespace Xunit.Sdk
         /// Resolves an individual generic type given an intended generic parameter type and the type of an object passed to that type.
         /// </summary>
         /// <param name="genericType">The generic type, e.g. T, to resolve.</param>
-        /// <param name="methodParameterType">The non-generic or open generic type, e.g. T, to try to match with the type of the objecct passed to that type.</param>
+        /// <param name="methodParameterType">The non-generic or open generic type, e.g. T, to try to match with the type of the object passed to that type.</param>
         /// <param name="passedParameterType">The non-generic or closed generic type, e.g. string, used to resolve the method parameter.</param>
         /// <param name="resultType">The resolved type, e.g. the parameters (T, T, string, typeof(object)) -> (T, T, string, typeof(string)).</param>
         /// <returns>True if resolving was successful, else false.</returns>
@@ -352,6 +396,16 @@ namespace Xunit.Sdk
                 resolvedTypes[idx] = ResolveGenericType(genericTypes[idx], parameters, parameterInfos);
 
             return resolvedTypes;
+        }
+
+        internal static object GetDefaultValue(this TypeInfo typeInfo)
+        {
+            if (typeInfo.IsValueType)
+            {
+                return Activator.CreateInstance(typeInfo.AsType());
+            }
+
+            return null;
         }
     }
 }

@@ -13,27 +13,42 @@ namespace Xunit.ConsoleClient
 {
     public class Program
     {
-        volatile static bool cancel;
-        static readonly ConcurrentDictionary<string, ExecutionSummary> completionMessages = new ConcurrentDictionary<string, ExecutionSummary>();
-        static bool failed;
-        static IRunnerLogger logger;
-        static IMessageSinkWithTypes reporterMessageHandler;
+        volatile bool cancel;
+        readonly ConcurrentDictionary<string, ExecutionSummary> completionMessages = new ConcurrentDictionary<string, ExecutionSummary>();
+        bool failed;
+        IRunnerLogger logger;
+        IMessageSinkWithTypes reporterMessageHandler;
 
         [STAThread]
         public static int Main(string[] args)
+        {
+#if NETCOREAPP1_0
+            using (NetCoreAssemblyHelper.SubscribeResolve())
+#else
+            using (AssemblyHelper.SubscribeResolve())
+#endif
+            {
+                return new Program().EntryPoint(args);
+            }
+        }
+
+        public int EntryPoint(string[] args)
         {
             try
             {
                 var reporters = GetAvailableRunnerReporters();
 
-                if (args.Length == 0 || args[0] == "-?")
+                if (args.Length == 0 || args[0] == "-?" || args[0] == "/?" || args[0] == "-h" || args[0] == "--help")
                 {
                     PrintHeader();
                     PrintUsage(reporters);
                     return 2;
                 }
 
+#if NET452
                 AppDomain.CurrentDomain.UnhandledException += OnUnhandledException;
+#endif
+
                 Console.CancelKeyPress += (sender, e) =>
                 {
                     if (!cancel)
@@ -62,7 +77,7 @@ namespace Xunit.ConsoleClient
                 var failCount = RunProject(commandLine.Project, commandLine.Serialize, commandLine.ParallelizeAssemblies,
                                            commandLine.ParallelizeTestCollections, commandLine.MaxParallelThreads,
                                            commandLine.DiagnosticMessages, commandLine.NoColor, commandLine.NoAppDomain,
-                                           commandLine.FailSkips);
+                                           commandLine.FailSkips, commandLine.InternalDiagnosticMessages);
 
                 if (commandLine.Wait)
                 {
@@ -77,6 +92,7 @@ namespace Xunit.ConsoleClient
             catch (ArgumentException ex)
             {
                 Console.WriteLine($"error: {ex.Message}");
+                Console.WriteLine(ex.StackTrace);
                 return 3;
             }
             catch (BadImageFormatException ex)
@@ -90,18 +106,23 @@ namespace Xunit.ConsoleClient
             }
         }
 
-        static List<IRunnerReporter> GetAvailableRunnerReporters()
+        List<IRunnerReporter> GetAvailableRunnerReporters()
         {
             var result = new List<IRunnerReporter>();
-            var runnerPath = Path.GetDirectoryName(Assembly.GetExecutingAssembly().GetLocalCodeBase());
+
+            var runnerPath = Path.GetDirectoryName(typeof(Program).GetTypeInfo().Assembly.Location);
 
             foreach (var dllFile in Directory.GetFiles(runnerPath, "*.dll").Select(f => Path.Combine(runnerPath, f)))
             {
-                Type[] types;
+                Type[] types = new Type[0];
 
                 try
                 {
+#if NET452
                     var assembly = Assembly.LoadFile(dllFile);
+#else
+                    var assembly = Assembly.Load(new AssemblyName(Path.GetFileNameWithoutExtension(dllFile)));
+#endif
                     types = assembly.GetTypes();
                 }
                 catch (ReflectionTypeLoadException ex)
@@ -116,7 +137,7 @@ namespace Xunit.ConsoleClient
                 foreach (var type in types)
                 {
 #pragma warning disable CS0618
-                    if (type == null || type.IsAbstract || type == typeof(DefaultRunnerReporter) || type == typeof(DefaultRunnerReporterWithTypes) || !type.GetInterfaces().Any(t => t == typeof(IRunnerReporter)))
+                    if (type == null || type.GetTypeInfo().IsAbstract || type == typeof(DefaultRunnerReporter) || type == typeof(DefaultRunnerReporterWithTypes) || !type.GetInterfaces().Any(t => t == typeof(IRunnerReporter)))
                         continue;
 #pragma warning restore CS0618
                     var ctor = type.GetConstructor(new Type[0]);
@@ -135,7 +156,8 @@ namespace Xunit.ConsoleClient
             return result;
         }
 
-        static void OnUnhandledException(object sender, UnhandledExceptionEventArgs e)
+#if NET452
+        void OnUnhandledException(object sender, UnhandledExceptionEventArgs e)
         {
             var ex = e.ExceptionObject as Exception;
 
@@ -146,26 +168,45 @@ namespace Xunit.ConsoleClient
 
             Environment.Exit(1);
         }
+#endif
 
-        static void PrintHeader()
+        void PrintHeader()
         {
-            Console.WriteLine($"xUnit.net Console Runner ({IntPtr.Size * 8}-bit .NET {Environment.Version})");
+#if NET452
+            var platform = $"Desktop .NET {Environment.Version}";
+#elif NETCOREAPP1_0
+            var platform = System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription;
+#else
+#error Unknown target platform
+#endif
+
+            Console.WriteLine($"xUnit.net Console Runner ({IntPtr.Size * 8}-bit {platform})");
         }
 
-        static void PrintUsage(IReadOnlyList<IRunnerReporter> reporters)
+        void PrintUsage(IReadOnlyList<IRunnerReporter> reporters)
         {
+#if NET452
             var executableName = Path.GetFileNameWithoutExtension(Assembly.GetExecutingAssembly().GetLocalCodeBase());
+#else
+            var executableName = "dotnet xunit";
+#endif
 
-            Console.WriteLine("Copyright (C) 2016 .NET Foundation.");
+            Console.WriteLine("Copyright (C) .NET Foundation.");
             Console.WriteLine();
             Console.WriteLine($"usage: {executableName} <assemblyFile> [configFile] [assemblyFile [configFile]...] [options] [reporter] [resultFormat filename [...]]");
             Console.WriteLine();
+#if NET452
             Console.WriteLine("Note: Configuration files must end in .json (for JSON) or .config (for XML)");
+#else
+            Console.WriteLine("Note: Configuration files must end in .json (XML is not supported on .NET Core)");
+#endif
             Console.WriteLine();
             Console.WriteLine("Valid options:");
             Console.WriteLine("  -nologo                : do not show the copyright message");
             Console.WriteLine("  -nocolor               : do not output results with colors");
+#if NET452
             Console.WriteLine("  -noappdomain           : do not use app domains to run test code");
+#endif
             Console.WriteLine("  -failskips             : convert skipped tests into failures");
             Console.WriteLine("  -parallel option       : set parallelization based on option");
             Console.WriteLine("                         :   none        - turn off all parallelization");
@@ -176,9 +217,12 @@ namespace Xunit.ConsoleClient
             Console.WriteLine("                         :   default   - run with default (1 thread per CPU thread)");
             Console.WriteLine("                         :   unlimited - run with unbounded thread count");
             Console.WriteLine("                         :   (number)  - limit task thread pool size to 'count'");
+#if NET452
             Console.WriteLine("  -noshadow              : do not shadow copy assemblies");
+#endif
             Console.WriteLine("  -wait                  : wait for input after completion");
             Console.WriteLine("  -diagnostics           : enable diagnostics messages for all test assemblies");
+            Console.WriteLine("  -internaldiagnostics   : enable internal diagnostics messages for all test assemblies");
             Console.WriteLine("  -debug                 : launch the debugger to debug the tests");
             Console.WriteLine("  -serialize             : serialize all test cases (for diagnostic purposes only)");
             Console.WriteLine("  -trait \"name=value\"    : only run tests with matching name/value traits");
@@ -196,6 +240,9 @@ namespace Xunit.ConsoleClient
             Console.WriteLine("                         : if specified more than once, acts as an OR operation");
             Console.WriteLine("  -noautoreporters       : do not allow reporters to be auto-enabled by environment");
             Console.WriteLine("                         : (for example, auto-detecting TeamCity or AppVeyor)");
+#if NETCOREAPP1_0
+            Console.WriteLine("  -framework \"name\"      : set the target framework");
+#endif
             Console.WriteLine();
 
             var switchableReporters = reporters.Where(r => !string.IsNullOrWhiteSpace(r.RunnerSwitch)).ToList();
@@ -215,7 +262,7 @@ namespace Xunit.ConsoleClient
             );
         }
 
-        static int RunProject(XunitProject project,
+        int RunProject(XunitProject project,
                               bool serialize,
                               bool? parallelizeAssemblies,
                               bool? parallelizeTestCollections,
@@ -223,7 +270,8 @@ namespace Xunit.ConsoleClient
                               bool diagnosticMessages,
                               bool noColor,
                               bool noAppDomain,
-                              bool failSkips)
+                              bool failSkips,
+                              bool internalDiagnosticMessages)
         {
             XElement assembliesElement = null;
             var clockTime = Stopwatch.StartNew();
@@ -239,33 +287,30 @@ namespace Xunit.ConsoleClient
 
             var originalWorkingFolder = Directory.GetCurrentDirectory();
 
-            using (AssemblyHelper.SubscribeResolve())
+            if (parallelizeAssemblies.GetValueOrDefault())
             {
-                if (parallelizeAssemblies.GetValueOrDefault())
+                var tasks = project.Assemblies.Select(assembly => Task.Run(() => ExecuteAssembly(consoleLock, assembly, serialize, needsXml, parallelizeTestCollections, maxThreadCount, diagnosticMessages, noColor, noAppDomain, failSkips, project.Filters, internalDiagnosticMessages)));
+                var results = Task.WhenAll(tasks).GetAwaiter().GetResult();
+                foreach (var assemblyElement in results.Where(result => result != null))
+                    assembliesElement.Add(assemblyElement);
+            }
+            else
+            {
+                foreach (var assembly in project.Assemblies)
                 {
-                    var tasks = project.Assemblies.Select(assembly => Task.Run(() => ExecuteAssembly(consoleLock, assembly, serialize, needsXml, parallelizeTestCollections, maxThreadCount, diagnosticMessages, noColor, noAppDomain, failSkips, project.Filters)));
-                    var results = Task.WhenAll(tasks).GetAwaiter().GetResult();
-                    foreach (var assemblyElement in results.Where(result => result != null))
+                    var assemblyElement = ExecuteAssembly(consoleLock, assembly, serialize, needsXml, parallelizeTestCollections, maxThreadCount, diagnosticMessages, noColor, noAppDomain, failSkips, project.Filters, internalDiagnosticMessages);
+                    if (assemblyElement != null)
                         assembliesElement.Add(assemblyElement);
                 }
-                else
-                {
-                    foreach (var assembly in project.Assemblies)
-                    {
-                        var assemblyElement = ExecuteAssembly(consoleLock, assembly, serialize, needsXml, parallelizeTestCollections, maxThreadCount, diagnosticMessages, noColor, noAppDomain, failSkips, project.Filters);
-                        if (assemblyElement != null)
-                            assembliesElement.Add(assemblyElement);
-                    }
-                }
-
-                clockTime.Stop();
-
-                if (assembliesElement != null)
-                    assembliesElement.Add(new XAttribute("timestamp", DateTime.Now.ToString(CultureInfo.InvariantCulture)));
-
-                if (completionMessages.Count > 0)
-                    reporterMessageHandler.OnMessage(new TestExecutionSummary(clockTime.Elapsed, completionMessages.OrderBy(kvp => kvp.Key).ToList()));
             }
+
+            clockTime.Stop();
+
+            if (assembliesElement != null)
+                assembliesElement.Add(new XAttribute("timestamp", DateTime.Now.ToString(CultureInfo.InvariantCulture)));
+
+            if (completionMessages.Count > 0)
+                reporterMessageHandler.OnMessage(new TestExecutionSummary(clockTime.Elapsed, completionMessages.OrderBy(kvp => kvp.Key).ToList()));
 
             Directory.SetCurrentDirectory(originalWorkingFolder);
 
@@ -274,7 +319,7 @@ namespace Xunit.ConsoleClient
             return failed ? 1 : completionMessages.Values.Sum(summary => summary.Failed);
         }
 
-        static XElement ExecuteAssembly(object consoleLock,
+        XElement ExecuteAssembly(object consoleLock,
                                         XunitProjectAssembly assembly,
                                         bool serialize,
                                         bool needsXml,
@@ -284,7 +329,8 @@ namespace Xunit.ConsoleClient
                                         bool noColor,
                                         bool noAppDomain,
                                         bool failSkips,
-                                        XunitFilters filters)
+                                        XunitFilters filters,
+                                        bool internalDiagnosticMessages)
         {
             if (cancel)
                 return null;
@@ -299,6 +345,7 @@ namespace Xunit.ConsoleClient
                 // Turn off pre-enumeration of theories, since there is no theory selection UI in this runner
                 assembly.Configuration.PreEnumerateTheories = false;
                 assembly.Configuration.DiagnosticMessages |= diagnosticMessages;
+                assembly.Configuration.InternalDiagnosticMessages |= internalDiagnosticMessages;
 
                 if (noAppDomain)
                     assembly.Configuration.AppDomain = AppDomainSupport.Denied;
@@ -365,6 +412,10 @@ namespace Xunit.ConsoleClient
                 while (e != null)
                 {
                     Console.WriteLine($"{e.GetType().FullName}: {e.Message}");
+
+                    if (internalDiagnosticMessages)
+                        Console.WriteLine(e.StackTrace);
+
                     e = e.InnerException;
                 }
             }
@@ -372,7 +423,7 @@ namespace Xunit.ConsoleClient
             return assemblyElement;
         }
 
-        static bool ValidateFileExists(object consoleLock, string fileName)
+        bool ValidateFileExists(object consoleLock, string fileName)
         {
             if (string.IsNullOrWhiteSpace(fileName) || File.Exists(fileName))
                 return true;

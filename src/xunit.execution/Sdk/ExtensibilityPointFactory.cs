@@ -12,7 +12,7 @@ namespace Xunit.Sdk
     public static class ExtensibilityPointFactory
     {
         static readonly DisposalTracker disposalTracker = new DisposalTracker();
-        static readonly ConcurrentDictionary<Type, object> instances = new ConcurrentDictionary<Type, object>();
+        static readonly ConcurrentDictionary<Tuple<Type, IMessageSink>, object> instances = new ConcurrentDictionary<Tuple<Type, IMessageSink>, object>();
 
         static object CreateInstance(IMessageSink diagnosticMessageSink, Type type, object[] ctorArgs)
         {
@@ -24,7 +24,7 @@ namespace Xunit.Sdk
                 var ctorArgsWithMessageSink = ctorArgs.Concat(new object[] { diagnosticMessageSink }).ToArray();
                 result = Activator.CreateInstance(type, ctorArgsWithMessageSink);
             }
-            catch
+            catch (MissingMemberException)
             {
                 try
                 {
@@ -67,7 +67,7 @@ namespace Xunit.Sdk
         /// <returns>The instance of the type.</returns>
         public static TInterface Get<TInterface>(IMessageSink diagnosticMessageSink, Type type, object[] ctorArgs = null)
         {
-            return (TInterface)instances.GetOrAdd(type, () => CreateInstance(diagnosticMessageSink, type, ctorArgs));
+            return (TInterface)instances.GetOrAdd(Tuple.Create(type, diagnosticMessageSink), () => CreateInstance(diagnosticMessageSink, type, ctorArgs));
         }
 
         /// <summary>
